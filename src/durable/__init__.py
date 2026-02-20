@@ -33,13 +33,14 @@ Quick start:
 
 from .backoff import BackoffStrategy, constant, exponential, linear
 from .context import RunContext
-from .store import SQLiteStore, Store
+from .store import InMemoryStore, SQLiteStore, Store
 from .workflow import Workflow
 
 __all__ = [
     "Workflow",
     "Store",
     "SQLiteStore",
+    "InMemoryStore",
     "RunContext",
     "BackoffStrategy",
     "exponential",

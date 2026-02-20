@@ -56,6 +56,42 @@ class Store(ABC):
         """Mark the run as failed with an error message."""
 
 
+_SENTINEL = object()
+
+
+class InMemoryStore(Store):
+    """
+    Dict-backed store — no persistence, no dependencies.
+
+    Useful for testing, short-lived scripts, and development where you don't
+    need crash recovery across process restarts.
+    """
+
+    def __init__(self) -> None:
+        self._steps: dict[tuple[str, str], Any] = {}
+        self._runs: dict[str, str] = {}
+
+    async def setup(self) -> None:
+        pass
+
+    async def get_step(self, run_id: str, step_id: str) -> tuple[bool, Any]:
+        value = self._steps.get((run_id, step_id), _SENTINEL)
+        if value is _SENTINEL:
+            return False, None
+        return True, value
+
+    async def set_step(
+        self, run_id: str, step_id: str, result: Any, attempt: int = 1
+    ) -> None:
+        self._steps[(run_id, step_id)] = result
+
+    async def mark_run_done(self, run_id: str) -> None:
+        self._runs[run_id] = "done"
+
+    async def mark_run_failed(self, run_id: str, error: str) -> None:
+        self._runs[run_id] = "failed"
+
+
 class SQLiteStore(Store):
     """
     Default store backed by a local SQLite file via aiosqlite.
