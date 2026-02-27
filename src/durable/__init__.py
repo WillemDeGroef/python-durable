@@ -33,6 +33,7 @@ Quick start:
 
 from .backoff import BackoffStrategy, constant, exponential, linear
 from .context import RunContext
+from .redis_store import RedisStore
 from .store import InMemoryStore, SQLiteStore, Store
 from .workflow import Workflow
 
@@ -41,6 +42,7 @@ __all__ = [
     "Store",
     "SQLiteStore",
     "InMemoryStore",
+    "RedisStore",
     "RunContext",
     "BackoffStrategy",
     "exponential",
