@@ -34,6 +34,11 @@ def _run_key(prefix: str, run_id: str) -> str:
     return f"{prefix}:run:{run_id}"
 
 
+def _sig_key(prefix: str, run_id: str, name: str) -> str:
+    tag = hashlib.sha256(f"{run_id}:{name}".encode()).hexdigest()[:16]
+    return f"{prefix}:sig:{tag}"
+
+
 class RedisStore(Store):
     """Async Redis store with TTL-based auto-expiration."""
 
@@ -90,6 +95,20 @@ class RedisStore(Store):
             await client.setex(key, self._ttl, payload)
         else:
             await client.set(key, payload)
+
+    async def get_signal(self, run_id: str, name: str) -> tuple[bool, Any]:
+        raw = await self._client().get(_sig_key(self._prefix, run_id, name))
+        if raw is None:
+            return False, None
+        return True, json.loads(raw)
+
+    async def set_signal(self, run_id: str, name: str, payload: Any) -> bool:
+        key = _sig_key(self._prefix, run_id, name)
+        client = self._client()
+        created = await client.set(key, json.dumps(payload), nx=True)
+        if created and self._ttl > 0:
+            await client.expire(key, self._ttl)
+        return bool(created)
 
     async def close(self) -> None:
         if self._redis is not None:

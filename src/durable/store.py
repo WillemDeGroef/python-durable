@@ -55,6 +55,14 @@ class Store(ABC):
     async def mark_run_failed(self, run_id: str, error: str) -> None:
         """Mark the run as failed with an error message."""
 
+    @abstractmethod
+    async def get_signal(self, run_id: str, name: str) -> tuple[bool, Any]:
+        """Return (found, payload). found=False means the signal hasn't been delivered yet."""
+
+    @abstractmethod
+    async def set_signal(self, run_id: str, name: str, payload: Any) -> bool:
+        """Write payload. Returns False if already set (idempotent, first-write-wins)."""
+
 
 _SENTINEL = object()
 
@@ -70,6 +78,7 @@ class InMemoryStore(Store):
     def __init__(self) -> None:
         self._steps: dict[tuple[str, str], Any] = {}
         self._runs: dict[str, str] = {}
+        self._signals: dict[tuple[str, str], Any] = {}
 
     async def setup(self) -> None:
         pass
@@ -90,6 +99,19 @@ class InMemoryStore(Store):
 
     async def mark_run_failed(self, run_id: str, error: str) -> None:
         self._runs[run_id] = "failed"
+
+    async def get_signal(self, run_id: str, name: str) -> tuple[bool, Any]:
+        key = (run_id, name)
+        if key in self._signals:
+            return True, self._signals[key]
+        return False, None
+
+    async def set_signal(self, run_id: str, name: str, payload: Any) -> bool:
+        key = (run_id, name)
+        if key in self._signals:
+            return False
+        self._signals[key] = payload
+        return True
 
 
 class SQLiteStore(Store):
@@ -125,6 +147,13 @@ class SQLiteStore(Store):
                     attempt    INTEGER NOT NULL DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (run_id, step_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS signals (
+                    run_id  TEXT NOT NULL,
+                    name    TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (run_id, name)
                 );
             """)
             await db.commit()
@@ -188,6 +217,26 @@ class SQLiteStore(Store):
                 (error, run_id),
             )
             await db.commit()
+
+    async def get_signal(self, run_id: str, name: str) -> tuple[bool, Any]:
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT payload FROM signals WHERE run_id = ? AND name = ?",
+                (run_id, name),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return False, None
+                return True, json.loads(row[0])
+
+    async def set_signal(self, run_id: str, name: str, payload: Any) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO signals (run_id, name, payload) VALUES (?, ?, ?)",
+                (run_id, name, json.dumps(payload)),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def ensure_run(self, run_id: str, workflow_id: str) -> None:
         async with aiosqlite.connect(self.path) as db:

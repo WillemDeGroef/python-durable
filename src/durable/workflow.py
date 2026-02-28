@@ -164,6 +164,8 @@ class Workflow:
         self._default_backoff = default_backoff
         self._store = self._build_store(db)
         self._initialized = False
+        self._sig_events: dict[str, asyncio.Event] = {}
+        self._sig_data: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # @wf.task — can be used bare or with arguments
@@ -319,6 +321,52 @@ class Workflow:
         if fn is not None:
             return decorator(fn)
         return decorator
+
+    # ------------------------------------------------------------------
+    # Signals — durable wait for external input
+    # ------------------------------------------------------------------
+
+    @property
+    def _current_run_id(self) -> str:
+        ctx = _active_run.get()
+        if ctx is None:
+            raise RuntimeError("signal() must be called inside an active workflow")
+        return ctx.run_id
+
+    async def signal(self, name: str, *, poll: float = 2.0) -> Any:
+        """Durably wait for an external signal inside a workflow."""
+        run_id = self._current_run_id
+        sk = f"{run_id}:{name}"
+
+        # Replay: already delivered?
+        found, payload = await self._store.get_signal(run_id, name)
+        if found:
+            return payload
+
+        # Wait: in-process event + store poll fallback
+        event = self._sig_events[sk] = asyncio.Event()
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=poll)
+                    return self._sig_data.pop(sk)
+                except asyncio.TimeoutError:
+                    found, payload = await self._store.get_signal(run_id, name)
+                    if found:
+                        return payload
+        finally:
+            self._sig_events.pop(sk, None)
+            self._sig_data.pop(sk, None)
+
+    async def complete(self, run_id: str, name: str, payload: Any = None) -> bool:
+        """Deliver a signal from the outside world (e.g. a web handler)."""
+        ok = await self._store.set_signal(run_id, name, payload or {})
+        if ok:
+            sk = f"{run_id}:{name}"
+            self._sig_data[sk] = payload or {}
+            if sk in self._sig_events:
+                self._sig_events[sk].set()
+        return ok
 
     # ------------------------------------------------------------------
     # Internal helpers
