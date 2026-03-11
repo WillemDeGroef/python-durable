@@ -122,28 +122,115 @@ If the workflow crashes mid-loop, only the remaining items are processed on rest
 
 ## Pydantic AI integration
 
-Make any [pydantic-ai](https://ai.pydantic.dev) agent durable with one line — no Temporal server, no Prefect cloud, no Postgres:
+Make any [pydantic-ai](https://ai.pydantic.dev) agent durable with **zero infrastructure** — no Temporal server, no Prefect cloud, no Postgres. Just decorators and a SQLite file.
+
+Pydantic AI natively supports three durable execution backends: **Temporal**, **DBOS**, and **Prefect**. All three require external infrastructure. `python-durable` is a fourth option that trades scale for simplicity:
+
+| Feature | Temporal | DBOS | Prefect | **python-durable** |
+|---------|----------|------|---------|-------------------|
+| Infrastructure | Server + Worker | Postgres | Cloud/Server | **SQLite file** |
+| Setup | Complex | Moderate | Moderate | **`pip install`** |
+| Lines to wrap an agent | ~20 | ~10 | ~10 | **1** |
+| Crash recovery | Yes | Yes | Yes | Yes |
+| Retries + backoff | Yes | Yes | Yes | Yes |
+| Human-in-the-loop signals | Yes | No | No | Yes |
+| Multi-process / distributed | Yes | Yes | Yes | No (single process) |
+| Production scale | Enterprise | Production | Production | **Dev / SME / CLI** |
+
+**Best for:** prototyping, CLI tools, single-process services, SME deployments, and any situation where you want durable agents without ops overhead.
+
+### DurableAgent
 
 ```python
 from pydantic_ai import Agent
 from durable import Workflow
-from durable.pydantic_ai import DurableAgent
+from durable.pydantic_ai import DurableAgent, TaskConfig
+from durable.backoff import exponential
 
 wf = Workflow("my-app")
-agent = Agent("openai:gpt-4o", instructions="Be helpful.")
+agent = Agent("openai:gpt-4o", instructions="Be helpful.", name="assistant")
 
 durable_agent = DurableAgent(agent, wf)
 
-# First call: runs the LLM, checkpoints the result to SQLite
 result = await durable_agent.run("What is the capital of France?")
+print(result.output)  # Paris
 
-# If the process crashes and restarts with the same run_id:
-# → replayed from SQLite, no LLM call, no token cost
+# Same run_id after crash → replayed from SQLite, no LLM call
+result = await durable_agent.run("What is the capital of France?", run_id="same-id")
 ```
 
-Also available: `@durable_tool` for checkpointing individual tool functions, `@durable_pipeline` for multi-agent workflows, and signal-based human-in-the-loop approval flows.
+With custom retry config:
 
-See [PYDANTIC_AI.md](PYDANTIC_AI.md) for full documentation and examples.
+```python
+durable_agent = DurableAgent(
+    agent,
+    wf,
+    model_task_config=TaskConfig(retries=5, backoff=exponential(base=2, max=120)),
+    tool_task_config=TaskConfig(retries=3),
+)
+```
+
+### @durable_tool
+
+Make individual tool functions durable:
+
+```python
+from durable.pydantic_ai import durable_tool
+
+@durable_tool(wf, retries=3, backoff=exponential(base=2, max=60))
+async def web_search(query: str) -> str:
+    async with httpx.AsyncClient() as client:
+        return (await client.get(f"https://api.search.com?q={query}")).text
+```
+
+### @durable_pipeline
+
+Multi-agent workflows with per-step checkpointing. On crash, completed steps replay from the store and only remaining work executes:
+
+```python
+from durable.pydantic_ai import durable_pipeline
+
+@durable_pipeline(wf, id="research-{topic_id}")
+async def research(topic_id: str, topic: str) -> str:
+    plan = await plan_research(topic)
+    findings = []
+    for i, query in enumerate(plan["queries"]):
+        r = await search(query, step_id=f"q-{i}")
+        findings.append(r)
+    return await summarize(findings)
+```
+
+### Comparison with Temporal
+
+```python
+# Temporal — requires server + worker + plugin
+from temporalio import workflow
+from pydantic_ai.durable_exec.temporal import TemporalAgent
+
+temporal_agent = TemporalAgent(agent)
+
+@workflow.defn
+class MyWorkflow:
+    @workflow.run
+    async def run(self, prompt: str):
+        return await temporal_agent.run(prompt)
+
+# python-durable
+from durable import Workflow
+from durable.pydantic_ai import DurableAgent
+
+wf = Workflow("my-app")
+durable_agent = DurableAgent(agent, wf)
+result = await durable_agent.run("Hello")
+```
+
+### Caveats
+
+- **Tool functions** registered on the pydantic-ai agent are NOT automatically wrapped. If they perform I/O, decorate them with `@durable_tool(wf)` or `@wf.task`.
+- **Streaming** (`agent.run_stream()`) is not supported in durable mode (same limitation as DBOS). Use `agent.run()`.
+- **Single process** — unlike Temporal/DBOS, python-durable runs in-process. For distributed workloads, use the Redis store.
+
+See [`examples/pydantic_ai_example.py`](examples/pydantic_ai_example.py) for five complete patterns.
 
 ## Important: JSON serialization
 

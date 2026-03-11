@@ -1,9 +1,4 @@
-"""
-Tests for durable.pydantic_ai integration.
-
-Uses InMemoryStore to avoid SQLite file creation during tests,
-and mocks pydantic-ai's Agent to avoid real LLM calls.
-"""
+"""Tests for durable.pydantic_ai integration."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,23 +17,15 @@ from durable.pydantic_ai import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def wf():
-    """Create a Workflow backed by InMemoryStore for testing."""
     return Workflow("test-app", db=InMemoryStore())
 
 
 def _mock_agent(name: str = "test-agent", output: str = "mocked output"):
-    """Create a mock pydantic-ai Agent."""
     agent = MagicMock()
     agent.name = name
 
-    # Mock run result
     run_result = MagicMock()
     run_result.output = output
     run_result.all_messages.return_value = []
@@ -48,15 +35,8 @@ def _mock_agent(name: str = "test-agent", output: str = "mocked output"):
     return agent, run_result
 
 
-# ---------------------------------------------------------------------------
-# DurableAgent basic tests
-# ---------------------------------------------------------------------------
-
-
 class TestDurableAgent:
-    @pytest.mark.asyncio
     async def test_basic_run(self, wf):
-        """DurableAgent.run() should call agent.run() and return the result."""
         agent, _ = _mock_agent(output="Paris")
         durable = DurableAgent(agent, wf)
 
@@ -65,24 +45,17 @@ class TestDurableAgent:
         assert result.output == "Paris"
         agent.run.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_replay_from_cache(self, wf):
-        """Second call with same run_id should replay, not call agent.run() again."""
         agent, _ = _mock_agent(output="Berlin")
         durable = DurableAgent(agent, wf)
 
-        # First call
         await durable.run("Capital of Germany?", run_id="test-replay")
         assert agent.run.call_count == 1
 
-        # Second call — should replay from store
         await durable.run("Capital of Germany?", run_id="test-replay")
-        # Still only 1 call — the second was replayed
         assert agent.run.call_count == 1
 
-    @pytest.mark.asyncio
     async def test_different_run_ids_execute_separately(self, wf):
-        """Different run_ids should each execute independently."""
         agent, _ = _mock_agent()
         durable = DurableAgent(agent, wf)
 
@@ -91,25 +64,19 @@ class TestDurableAgent:
 
         assert agent.run.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_auto_generated_run_id(self, wf):
-        """When no run_id is provided, one should be generated from prompt hash."""
         agent, _ = _mock_agent(output="Tokyo")
         durable = DurableAgent(agent, wf)
 
         result = await durable.run("Capital of Japan?")
         assert result.output == "Tokyo"
 
-    @pytest.mark.asyncio
     async def test_custom_name(self, wf):
-        """DurableAgent should accept a custom name override."""
         agent, _ = _mock_agent(name="original")
         durable = DurableAgent(agent, wf, name="custom-name")
         assert durable.name == "custom-name"
 
-    @pytest.mark.asyncio
     async def test_deps_forwarded(self, wf):
-        """Dependencies should be forwarded to agent.run()."""
         agent, _ = _mock_agent()
         durable = DurableAgent(agent, wf)
 
@@ -120,15 +87,8 @@ class TestDurableAgent:
         assert call_kwargs[1].get("deps") == deps
 
 
-# ---------------------------------------------------------------------------
-# TaskConfig tests
-# ---------------------------------------------------------------------------
-
-
 class TestTaskConfig:
-    @pytest.mark.asyncio
     async def test_custom_retries(self, wf):
-        """TaskConfig retries should propagate to the durable task."""
         agent, _ = _mock_agent()
         durable = DurableAgent(
             agent,
@@ -137,9 +97,7 @@ class TestTaskConfig:
         )
         assert durable._model_retries == 7
 
-    @pytest.mark.asyncio
     async def test_custom_backoff(self, wf):
-        """TaskConfig backoff should propagate."""
         custom_backoff = exponential(base=3, max=90)
         agent, _ = _mock_agent()
         durable = DurableAgent(
@@ -149,24 +107,15 @@ class TestTaskConfig:
         )
         assert durable._model_backoff is custom_backoff
 
-    @pytest.mark.asyncio
     async def test_default_config(self, wf):
-        """Default config should use sensible defaults."""
         agent, _ = _mock_agent()
         durable = DurableAgent(agent, wf)
         assert durable._model_retries == 3
         assert durable._tool_retries == 2
 
 
-# ---------------------------------------------------------------------------
-# Signal (human-in-the-loop) tests
-# ---------------------------------------------------------------------------
-
-
 class TestDurableAgentSignal:
-    @pytest.mark.asyncio
     async def test_signal_integration(self, wf):
-        """DurableAgent.signal() should delegate to wf.signal()."""
         agent, _ = _mock_agent(output="reviewed")
         durable = DurableAgent(agent, wf)
 
@@ -174,7 +123,6 @@ class TestDurableAgentSignal:
         async def workflow_with_signal():
             result = await durable.run("Review this", run_id="signal-inner")
 
-            # Deliver signal before waiting
             await wf.complete("signal-test", "approval", {"ok": True})
             approval = await durable.signal("approval")
             return {"result": result.output, "approval": approval}
@@ -183,16 +131,8 @@ class TestDurableAgentSignal:
         assert out["approval"] == {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# @durable_tool tests
-# ---------------------------------------------------------------------------
-
-
 class TestDurableTool:
-    @pytest.mark.asyncio
     async def test_durable_tool_decorator(self, wf):
-        """@durable_tool should create a checkpointed task."""
-
         @durable_tool(wf, retries=3)
         async def my_tool(query: str) -> str:
             return f"result for {query}"
@@ -204,9 +144,7 @@ class TestDurableTool:
         result = await test_wf.run("tool-test")
         assert result == "result for test query"
 
-    @pytest.mark.asyncio
     async def test_durable_tool_caches(self, wf):
-        """Durable tool should cache results on replay."""
         call_count = 0
 
         @durable_tool(wf, retries=1)
@@ -219,39 +157,25 @@ class TestDurableTool:
         async def test_wf():
             return await counting_tool(5)
 
-        # First run
         r1 = await test_wf.run("tool-cache-test")
         assert r1 == 10
         assert call_count == 1
 
-        # Second run — replayed
         r2 = await test_wf.run("tool-cache-test")
         assert r2 == 10
-        assert call_count == 1  # not called again
+        assert call_count == 1
 
-    @pytest.mark.asyncio
     async def test_durable_tool_outside_workflow(self, wf):
-        """Durable tool should work as a plain async function outside workflows."""
-
         @durable_tool(wf)
         async def plain_tool(x: int) -> int:
             return x + 1
 
-        # Call outside any workflow context — should just execute
         result = await plain_tool(10)
         assert result == 11
 
 
-# ---------------------------------------------------------------------------
-# @durable_pipeline tests
-# ---------------------------------------------------------------------------
-
-
 class TestDurablePipeline:
-    @pytest.mark.asyncio
     async def test_pipeline_decorator(self, wf):
-        """@durable_pipeline should work as syntactic sugar for @wf.workflow."""
-
         @wf.task
         async def step_a(x: int) -> int:
             return x + 1
@@ -268,10 +192,7 @@ class TestDurablePipeline:
         result = await my_pipeline(n=5)
         assert result == 12  # (5+1)*2
 
-    @pytest.mark.asyncio
     async def test_pipeline_with_loop(self, wf):
-        """Pipeline with loop and step_id should checkpoint each iteration."""
-
         @wf.task
         async def process_item(item: str) -> str:
             return f"processed-{item}"
@@ -287,11 +208,6 @@ class TestDurablePipeline:
 
         result = await batch_pipeline(batch="test")
         assert result == ["processed-a", "processed-b", "processed-c"]
-
-
-# ---------------------------------------------------------------------------
-# Helper function tests
-# ---------------------------------------------------------------------------
 
 
 class TestHelpers:
@@ -339,7 +255,6 @@ class TestAgentRunResult:
 
 class TestSerializeMessages:
     def test_serialize_pydantic_model(self):
-        """Should serialize objects with .model_dump()."""
         mock = MagicMock()
         mock.model_dump.return_value = {"role": "user", "content": "hi"}
         type(mock).__name__ = "ModelRequest"
@@ -357,16 +272,8 @@ class TestSerializeMessages:
         assert "__repr__" in result[0]
 
 
-# ---------------------------------------------------------------------------
-# Integration test: full multi-step workflow
-# ---------------------------------------------------------------------------
-
-
 class TestIntegration:
-    @pytest.mark.asyncio
     async def test_full_multi_agent_pipeline(self, wf):
-        """End-to-end test: multi-agent pipeline with crash recovery simulation."""
-
         execution_log = []
 
         @wf.task
@@ -393,7 +300,6 @@ class TestIntegration:
                 findings.append(r)
             return await summarize(findings)
 
-        # First run
         result = await pipeline(tid="test-1")
         assert result == "Summary of 3 findings"
         assert execution_log == [
@@ -404,24 +310,19 @@ class TestIntegration:
             "summarize",
         ]
 
-        # Second run — all steps replayed
         execution_log.clear()
         result = await pipeline(tid="test-1")
         assert result == "Summary of 3 findings"
-        assert execution_log == []  # nothing re-executed
+        assert execution_log == []
 
-    @pytest.mark.asyncio
     async def test_durable_agent_with_mock_agent(self, wf):
-        """DurableAgent with mocked pydantic-ai agent, full lifecycle."""
         agent, _ = _mock_agent(output="42")
         durable = DurableAgent(agent, wf, name="calculator")
 
-        # Run 1: executes
         r1 = await durable.run("What is 6*7?", run_id="calc-1")
         assert r1.output == "42"
         assert agent.run.call_count == 1
 
-        # Run 2: replays
         r2 = await durable.run("What is 6*7?", run_id="calc-1")
         assert r2.output == "42"
-        assert agent.run.call_count == 1  # not called again
+        assert agent.run.call_count == 1
