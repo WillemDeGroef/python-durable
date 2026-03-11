@@ -221,7 +221,8 @@ class DurableAgent(Generic[AgentDepsT, OutputT]):
             step_id="agent-run",
             **kwargs,
         )
-        return _AgentRunResult(result)
+        output_type = getattr(self.agent, "_output_type", None)
+        return _AgentRunResult(result, output_type=output_type)
 
     async def _do_model_request(
         self,
@@ -282,15 +283,19 @@ class _AgentRunResult:
     """Wrapper that holds an agent RunResult and handles both live and
     deserialized (dict) results transparently."""
 
-    def __init__(self, result: Any) -> None:
+    def __init__(self, result: Any, output_type: type | None = None) -> None:
         self._result = result
+        self._output_type = output_type
 
     @property
     def output(self) -> Any:
         if hasattr(self._result, "output"):
             return self._result.output
         if isinstance(self._result, dict):
-            return self._result.get("output")
+            raw = self._result.get("output")
+            if isinstance(raw, dict) and self._output_type and hasattr(self._output_type, "model_validate"):
+                return self._output_type.model_validate(raw)
+            return raw
         return self._result
 
     @property
