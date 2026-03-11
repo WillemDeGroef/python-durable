@@ -45,7 +45,7 @@ def _deserialize_messages(data: list[dict]) -> list[Any]:
             ModelResponse,
         )
 
-        _type_map: dict[str, type] = {
+        _type_map: dict[str, type[Any]] = {
             "ModelRequest": ModelRequest,
             "ModelResponse": ModelResponse,
         }
@@ -57,7 +57,8 @@ def _deserialize_messages(data: list[dict]) -> list[Any]:
         type_name = item.pop("__type__", None) if isinstance(item, dict) else None
         if type_name and type_name in _type_map:
             try:
-                result.append(_type_map[type_name].model_validate(item))
+                cls = _type_map[type_name]
+                result.append(cls(**item))
             except Exception:
                 item["__type__"] = type_name
                 result.append(item)

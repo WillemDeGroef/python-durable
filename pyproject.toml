@@ -37,6 +37,7 @@ dev = [
     "ty>=0.0.1a7",
     "fakeredis>=2.26",
     "redis>=5.0",
+    "pydantic-ai>=0.1",
 ]
 examples = [
     "pydantic>=2.0",
