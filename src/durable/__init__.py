@@ -37,6 +37,27 @@ from .redis_store import RedisStore
 from .store import InMemoryStore, SQLiteStore, Store
 from .workflow import Workflow
 
+_PYDANTIC_AI_NAMES = {"DurableAgent", "TaskConfig", "durable_tool", "durable_pipeline"}
+
+
+def __getattr__(name: str):
+    if name in _PYDANTIC_AI_NAMES:
+        from .pydantic_ai import (
+            DurableAgent,
+            TaskConfig,
+            durable_pipeline,
+            durable_tool,
+        )
+
+        return {
+            "DurableAgent": DurableAgent,
+            "TaskConfig": TaskConfig,
+            "durable_tool": durable_tool,
+            "durable_pipeline": durable_pipeline,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "Workflow",
     "Store",
@@ -48,6 +69,11 @@ __all__ = [
     "exponential",
     "constant",
     "linear",
+    # pydantic-ai integration (optional)
+    "DurableAgent",
+    "TaskConfig",
+    "durable_tool",
+    "durable_pipeline",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

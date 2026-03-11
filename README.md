@@ -2,12 +2,18 @@
 
 Lightweight workflow durability for Python. Make any async workflow resumable after crashes with just a decorator.
 
-Backed by SQLite out of the box; swap in any `Store` subclass for production.
+Backed by SQLite out of the box; swap in Redis or any `Store` subclass for production.
 
 ## Install
 
 ```bash
 pip install python-durable
+
+# With Redis support
+pip install python-durable[redis]
+
+# With Pydantic AI integration
+pip install python-durable[pydantic-ai]
 ```
 
 ## Quick start
@@ -44,15 +50,47 @@ await run_pipeline(source="users")
 
 2. **`@wf.workflow`** marks the entry point of a durable run. It manages a `RunContext` (via `ContextVar`) so tasks automatically know which run they belong to. The `id` parameter is a template string resolved from function arguments at call time.
 
-3. **`Store`** is the persistence backend. `SQLiteStore` is the default (zero config, backed by aiosqlite). Subclass `Store` to use Postgres, Redis, or anything else.
+3. **`Store`** is the persistence backend. `SQLiteStore` is the default (zero config, backed by aiosqlite). `RedisStore` is available for distributed setups. Subclass `Store` to use Postgres or anything else.
 
 ## Features
 
 - **Crash recovery** — completed steps are never re-executed after a restart
 - **Automatic retries** — configurable per-task with `exponential`, `linear`, or `constant` backoff
+- **Signals** — durably wait for external input (approvals, webhooks, human-in-the-loop)
 - **Loop support** — use `step_id` to checkpoint each iteration independently
 - **Zero magic outside workflows** — tasks work as plain async functions when called without a workflow context
-- **Pluggable storage** — SQLite by default, bring your own `Store` for production
+- **Pluggable storage** — SQLite by default, Redis built-in, or bring your own `Store`
+
+## Signals
+
+Workflows can pause and wait for external input using signals:
+
+```python
+@wf.workflow(id="order-{order_id}")
+async def process_order(order_id: str) -> None:
+    await prepare_order(order_id)
+    approval = await wf.signal("manager-approval")  # pauses here
+    if approval["approved"]:
+        await ship_order(order_id)
+
+# From the outside (e.g. a web handler):
+await wf.complete("order-42", "manager-approval", {"approved": True})
+```
+
+Signals are durable — if the workflow crashes and restarts, a previously delivered signal replays instantly.
+
+## Redis store
+
+For distributed or multi-process setups, use `RedisStore` instead of the default SQLite:
+
+```python
+from durable import Workflow, RedisStore
+
+store = RedisStore(url="redis://localhost:6379/0", ttl=86400)
+wf = Workflow("my-app", db=store)
+```
+
+Keys auto-expire based on `ttl` (default: 24 hours).
 
 ## Backoff strategies
 
@@ -81,6 +119,31 @@ async def process_batch(batch_id: str) -> None:
 ```
 
 If the workflow crashes mid-loop, only the remaining items are processed on restart.
+
+## Pydantic AI integration
+
+Make any [pydantic-ai](https://ai.pydantic.dev) agent durable with one line — no Temporal server, no Prefect cloud, no Postgres:
+
+```python
+from pydantic_ai import Agent
+from durable import Workflow
+from durable.pydantic_ai import DurableAgent
+
+wf = Workflow("my-app")
+agent = Agent("openai:gpt-4o", instructions="Be helpful.")
+
+durable_agent = DurableAgent(agent, wf)
+
+# First call: runs the LLM, checkpoints the result to SQLite
+result = await durable_agent.run("What is the capital of France?")
+
+# If the process crashes and restarts with the same run_id:
+# → replayed from SQLite, no LLM call, no token cost
+```
+
+Also available: `@durable_tool` for checkpointing individual tool functions, `@durable_pipeline` for multi-agent workflows, and signal-based human-in-the-loop approval flows.
+
+See [PYDANTIC_AI.md](PYDANTIC_AI.md) for full documentation and examples.
 
 ## Important: JSON serialization
 
