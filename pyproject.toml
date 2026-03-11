@@ -1,6 +1,6 @@
 [project]
 name = "python-durable"
-version = "0.2.2"
+version = "0.2.3"
 description = "Lightweight workflow durability for Python — make any async workflow resumable after crashes with just a decorator."
 readme = "README.md"
 license = "MIT"
