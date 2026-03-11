@@ -23,6 +23,8 @@ _WRAP_KEY = "v"
 
 
 def _wrap(value: Any) -> str:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
     return json.dumps({_WRAP_KEY: value})
 
 

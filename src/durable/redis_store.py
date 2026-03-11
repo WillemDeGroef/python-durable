@@ -18,6 +18,8 @@ _WRAP_KEY = "v"
 
 
 def _wrap(value: Any) -> str:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
     return json.dumps({_WRAP_KEY: value})
 
 
@@ -71,6 +73,8 @@ class RedisStore(Store):
     async def set_step(
         self, run_id: str, step_id: str, result: Any, attempt: int = 1
     ) -> None:
+        if hasattr(result, "model_dump"):
+            result = result.model_dump(mode="json")
         payload = json.dumps({"v": result, "attempt": attempt})
         key = _step_key(self._prefix, run_id, step_id)
         client = self._client()

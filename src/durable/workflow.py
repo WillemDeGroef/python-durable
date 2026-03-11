@@ -26,7 +26,7 @@ import functools
 import inspect
 import logging
 import re
-from typing import Any, Callable, ParamSpec, TypeVar, overload
+from typing import Any, Callable, ParamSpec, TypeVar, get_type_hints, overload
 
 from .backoff import BackoffStrategy, exponential
 from .context import RunContext, _active_run
@@ -74,6 +74,12 @@ class _TaskWrapper:
         self._step_name = step_name
         self._retries = retries
         self._backoff = backoff
+        # Extract return type hint for Pydantic model rehydration on replay
+        try:
+            hints = get_type_hints(fn)
+        except Exception:
+            hints = {}
+        self._return_type = hints.get("return")
         # Preserve the original function's metadata for IDE / tooling support
         functools.update_wrapper(self, fn)
 
@@ -97,7 +103,7 @@ class _TaskWrapper:
             log.debug(
                 "[durable] ↩  %s (step=%s) — replayed from store", self._step_name, sid
             )
-            return cached
+            return self._rehydrate(cached)
 
         return await self._execute_with_retry(ctx, sid, args, kwargs)
 
@@ -136,6 +142,17 @@ class _TaskWrapper:
                 )
 
         raise last_exc  # type: ignore[misc]
+
+    def _rehydrate(self, value: Any) -> Any:
+        """Re-inflate a cached dict into a Pydantic model if the return type hint says so."""
+        if (
+            isinstance(value, dict)
+            and self._return_type is not None
+            and isinstance(self._return_type, type)
+            and hasattr(self._return_type, "model_validate")
+        ):
+            return self._return_type.model_validate(value)
+        return value
 
     def __repr__(self) -> str:
         return f"<DurableTask '{self._step_name}' retries={self._retries}>"
