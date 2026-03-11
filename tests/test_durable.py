@@ -240,3 +240,128 @@ async def test_task_reuse_across_workflows():
         assert call_log == []
 
     print("  ✓ Shared tasks are isolated per workflow run")
+
+
+# ---------------------------------------------------------------------------
+# 7. Pydantic model serialization/deserialization in @wf.task
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+
+
+class UserModel(BaseModel):
+    id: int
+    name: str
+    email: str
+
+
+async def test_pydantic_model_serializes_from_task():
+    """Pydantic model returned from @wf.task serializes without error on first run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        wf = make_wf(tmp)
+
+        @wf.task
+        async def fetch_user() -> UserModel:
+            return UserModel(id=1, name="Alice", email="alice@example.com")
+
+        @wf.workflow(id="test-pydantic-serialize")
+        async def my_workflow() -> UserModel:
+            return await fetch_user()
+
+        result = await my_workflow()
+        assert isinstance(result, UserModel)
+        assert result.id == 1
+        assert result.name == "Alice"
+
+
+async def test_pydantic_model_rehydrated_on_replay():
+    """Pydantic model is correctly rehydrated on replay (not returned as dict)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        wf = make_wf(tmp)
+        call_log = []
+
+        @wf.task
+        async def fetch_user() -> UserModel:
+            call_log.append("fetch")
+            return UserModel(id=2, name="Bob", email="bob@example.com")
+
+        @wf.workflow(id="test-pydantic-replay")
+        async def my_workflow() -> UserModel:
+            return await fetch_user()
+
+        # First run
+        result = await my_workflow()
+        assert isinstance(result, UserModel)
+        assert call_log == ["fetch"]
+
+        # Second run — replayed from store
+        call_log.clear()
+        result = await my_workflow()
+        assert call_log == [], "Task was re-executed but should have been replayed!"
+        assert isinstance(result, UserModel), f"Expected UserModel, got {type(result)}"
+        assert result.id == 2
+        assert result.name == "Bob"
+
+
+async def test_plain_types_still_work():
+    """Plain dict/string/int returns still work (no regression)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        wf = make_wf(tmp)
+
+        @wf.task
+        async def return_dict() -> dict:
+            return {"key": "value"}
+
+        @wf.task
+        async def return_str() -> str:
+            return "hello"
+
+        @wf.task
+        async def return_int() -> int:
+            return 42
+
+        @wf.workflow(id="test-plain-types")
+        async def my_workflow():
+            d = await return_dict()
+            s = await return_str()
+            i = await return_int()
+            return d, s, i
+
+        d, s, i = await my_workflow()
+        assert d == {"key": "value"}
+        assert s == "hello"
+        assert i == 42
+
+        # Replay
+        d, s, i = await my_workflow()
+        assert d == {"key": "value"}
+        assert s == "hello"
+        assert i == 42
+
+
+async def test_pydantic_without_return_type_hint():
+    """Task without return type hint still serializes Pydantic models (but no rehydration)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        wf = make_wf(tmp)
+        call_log = []
+
+        @wf.task
+        async def fetch_user():
+            call_log.append("fetch")
+            return UserModel(id=3, name="Charlie", email="charlie@example.com")
+
+        @wf.workflow(id="test-pydantic-no-hint")
+        async def my_workflow():
+            return await fetch_user()
+
+        # First run — should serialize without error
+        result = await my_workflow()
+        assert result.id == 3
+        assert call_log == ["fetch"]
+
+        # Replay — no type hint, so it comes back as dict (no rehydration)
+        call_log.clear()
+        result = await my_workflow()
+        assert call_log == []
+        assert isinstance(result, dict), f"Expected dict without type hint, got {type(result)}"
+        assert result["id"] == 3
