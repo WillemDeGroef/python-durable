@@ -342,3 +342,73 @@ class TestIntegration:
         r2 = await durable.run("Test prompt", run_id="sqlite-1")
         assert r2.output == "serialized ok"
         assert agent.run.call_count == 1
+
+    async def test_pydantic_model_output_preserved_on_replay(self, wf):
+        """Pydantic model output should be re-hydrated on replay, not returned as dict."""
+        from pydantic import BaseModel
+
+        class CityInfo(BaseModel):
+            name: str
+            population: int
+
+        city = CityInfo(name="Paris", population=2_161_000)
+
+        agent, run_result = _mock_agent()
+        run_result.output = city
+        agent._output_type = CityInfo
+
+        durable = DurableAgent(agent, wf, name="city-agent")
+
+        r1 = await durable.run("Tell me about Paris", run_id="pydantic-1")
+        assert isinstance(r1.output, CityInfo)
+        assert r1.output.name == "Paris"
+        assert agent.run.call_count == 1
+
+        # Replay — should still return a CityInfo, not a dict
+        r2 = await durable.run("Tell me about Paris", run_id="pydantic-1")
+        assert isinstance(r2.output, CityInfo)
+        assert r2.output.name == "Paris"
+        assert r2.output.population == 2_161_000
+        assert agent.run.call_count == 1
+
+    async def test_plain_string_output_no_regression(self, wf):
+        """Plain string outputs should still work after the output_type change."""
+        agent, _ = _mock_agent(output="just a string")
+        agent._output_type = None
+
+        durable = DurableAgent(agent, wf, name="string-agent")
+
+        r1 = await durable.run("Say hello", run_id="string-1")
+        assert r1.output == "just a string"
+
+        r2 = await durable.run("Say hello", run_id="string-1")
+        assert r2.output == "just a string"
+
+
+class TestAgentRunResultRehydration:
+    def test_rehydrate_dict_with_output_type(self):
+        from pydantic import BaseModel
+
+        class Item(BaseModel):
+            id: int
+            label: str
+
+        wrapper = _AgentRunResult({"output": {"id": 1, "label": "test"}}, output_type=Item)
+        result = wrapper.output
+        assert isinstance(result, Item)
+        assert result.id == 1
+        assert result.label == "test"
+
+    def test_no_rehydrate_without_output_type(self):
+        wrapper = _AgentRunResult({"output": {"id": 1, "label": "test"}})
+        result = wrapper.output
+        assert isinstance(result, dict)
+
+    def test_no_rehydrate_non_dict_output(self):
+        from pydantic import BaseModel
+
+        class Item(BaseModel):
+            id: int
+
+        wrapper = _AgentRunResult({"output": "plain string"}, output_type=Item)
+        assert wrapper.output == "plain string"
