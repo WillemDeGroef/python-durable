@@ -1,7 +1,7 @@
 """
 Redis-backed store with automatic key expiration.
 
-Requires the ``redis`` extra: ``pip install python-durable[redis]``.
+Requires the ``redis`` extra: ``uv sync --extra redis``.
 """
 
 from __future__ import annotations

@@ -1,11 +1,11 @@
 """Durable pydantic-ai agents with python-durable.
 
 Requires:
-    pip install python-durable pydantic-ai
+    uv sync --all-extras
     export OPENAI_API_KEY=sk-...
 
 Run:
-    python examples/pydantic_ai_example.py
+    uv run python examples/pydantic_ai_example.py
 """
 
 import asyncio
@@ -24,7 +24,7 @@ wf = Workflow("ai-agents", db="ai_agents.db")
 # Example 1 — DurableAgent
 
 geography_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5.2",
     instructions="You're an expert in geography. Give concise answers.",
     name="geography",
 )
@@ -51,7 +51,7 @@ async def example_1():
 # Example 2 — DurableAgent with custom retry config
 
 coding_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5.2",
     instructions="You're an expert Python developer. Be concise.",
     name="coder",
 )
@@ -80,7 +80,7 @@ class ResearchPlan(BaseModel):
 
 
 planner_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5.2",
     output_type=ResearchPlan,
     instructions=(
         "Given a research topic, produce 3-5 specific search queries "
@@ -90,7 +90,7 @@ planner_agent = Agent(
 )
 
 summarizer_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5.2",
     instructions="Synthesize research findings into a clear, concise summary.",
     name="summarizer",
 )
@@ -141,7 +141,7 @@ async def example_3():
 # Example 4 — Human-in-the-loop with AI review + signals
 
 review_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-5.2",
     instructions=(
         "You review invoice data for compliance. "
         "Return a brief assessment and risk level (low/medium/high)."
@@ -220,7 +220,7 @@ async def daily_briefing(user_id: str) -> str:
     news = await fetch_news("e-invoicing Belgium", step_id="news")
 
     agent = Agent(
-        "openai:gpt-4o",
+        "openai:gpt-5.2",
         instructions="Create a brief daily briefing from the provided data.",
     )
     result = await agent.run(f"Weather: {weather}\nNews: {news}")

@@ -148,7 +148,7 @@ from durable.pydantic_ai import DurableAgent, TaskConfig
 from durable.backoff import exponential
 
 wf = Workflow("my-app")
-agent = Agent("openai:gpt-4o", instructions="Be helpful.", name="assistant")
+agent = Agent("openai:gpt-5.2", instructions="Be helpful.", name="assistant")
 
 durable_agent = DurableAgent(agent, wf)
 
