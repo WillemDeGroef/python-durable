@@ -69,6 +69,20 @@ def _deserialize_messages(data: list[dict]) -> list[Any]:
     return result
 
 
+def _serialize_run_result(result: Any) -> dict:
+    """Convert an agent RunResult to a JSON-serializable dict."""
+    output = result.output
+    # If output is a pydantic model, convert to dict
+    if hasattr(output, "model_dump"):
+        output = output.model_dump(mode="json")
+    data: dict[str, Any] = {"output": output}
+    try:
+        data["all_messages"] = _serialize_messages(result.all_messages())
+    except Exception:
+        data["all_messages"] = []
+    return data
+
+
 def _run_id_for_agent(agent_name: str, prompt: str, run_id: str | None) -> str:
     """Generate a deterministic run ID from the agent name and prompt."""
     if run_id:
@@ -207,7 +221,7 @@ class DurableAgent(Generic[AgentDepsT, OutputT]):
             step_id="agent-run",
             **kwargs,
         )
-        return result
+        return _AgentRunResult(result)
 
     async def _do_model_request(
         self,
@@ -225,7 +239,7 @@ class DurableAgent(Generic[AgentDepsT, OutputT]):
         run_kwargs.update(kwargs)
 
         result = await self.agent.run(prompt, **run_kwargs)
-        return _AgentRunResult(result)
+        return _serialize_run_result(result)
 
     async def _do_tool_call(
         self,
