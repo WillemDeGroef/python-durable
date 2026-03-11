@@ -326,3 +326,19 @@ class TestIntegration:
         r2 = await durable.run("What is 6*7?", run_id="calc-1")
         assert r2.output == "42"
         assert agent.run.call_count == 1
+
+    async def test_durable_agent_with_sqlite_store(self, tmp_path):
+        """Ensure agent results are JSON-serializable for SQLiteStore."""
+        db_path = str(tmp_path / "test.db")
+        wf = Workflow("test-sqlite", db=db_path)
+
+        agent, _ = _mock_agent(output="serialized ok")
+        durable = DurableAgent(agent, wf, name="sqlite-agent")
+
+        r1 = await durable.run("Test prompt", run_id="sqlite-1")
+        assert r1.output == "serialized ok"
+        assert agent.run.call_count == 1
+
+        r2 = await durable.run("Test prompt", run_id="sqlite-1")
+        assert r2.output == "serialized ok"
+        assert agent.run.call_count == 1
