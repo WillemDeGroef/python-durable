@@ -6,8 +6,7 @@ This is ideal for production deployments where multiple workers share state
 or you want old runs to expire automatically.
 
 Prerequisites:
-    pip install python-durable[redis]
-    # or: uv sync --all-extras
+    uv sync --all-extras
 
     # Redis must be running locally (default: localhost:6379)
     docker run -d --name redis -p 6379:6379 redis:latest
